@@ -1,7 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';
-import { X, Plus, Trash2, Calculator, Check } from 'lucide-react';
+import { 
+  X, 
+  Calculator, 
+  Check, 
+  Home, 
+  Truck, 
+  Layers, 
+  Clock, 
+  Cpu, 
+  Package 
+} from 'lucide-react';
+import type { ProductionOrigin } from '../types';
 
 interface Props {
   categoryName: string;
@@ -9,127 +20,81 @@ interface Props {
   onClose: () => void;
 }
 
-interface SupplyUsageRow {
-  supplyId: number;
-  name: string;
-  unitPrice: number;
-  calcMode: 'grams' | 'batch';
-  gramsUsed: number;
-  totalGramsInPackage: number;
-  quantityUsed: number;
-  unitsProduced: number;
-}
-
 export const CostCalculatorModal: React.FC<Props> = ({ categoryName, onApplyCost, onClose }) => {
   const supplies = useLiveQuery(() => db.supplies.toArray()) ?? [];
-  const categories = useLiveQuery(() => db.categories.toArray()) ?? [];
+  const machinery = useLiveQuery(() => db.machinery.toArray()) ?? [];
 
-  const isSticker = categoryName.toLowerCase().includes('sticker') || categoryName.toLowerCase().includes('print');
-  const isPin = categoryName.toLowerCase().includes('pin');
+  // Pestaña Principal: Hecho en Casa vs. Tercerizado
+  const [origin, setOrigin] = useState<ProductionOrigin>('outsourced');
 
-  const currentCategoryConfig = categories.find((c) => c.name.toLowerCase() === categoryName.toLowerCase());
+  // ==========================================
+  // ESTADOS: TERCERIZADO / FUERA DE CASA
+  // ==========================================
+  const [outsourcedType, setOutsourcedType] = useState<'sheet' | 'unit'>('sheet');
+  const [outsourcedSheetName, setOutsourcedSheetName] = useState('A4');
+  const [outsourcedSheetCost, setOutsourcedSheetCost] = useState('6.0'); // Lo que cobra la imprenta por hoja
+  const [outsourcedYield, setOutsourcedYield] = useState('24');          // Cuántos salen de esa hoja
+  const [outsourcedDirectUnitCost, setOutsourcedDirectUnitCost] = useState('2.5'); // Si cobra por unidad (pines)
+  const [extraPackagingCost, setExtraPackagingCost] = useState('0.20'); // Bolsita/empaque adicional
 
-  // STICKERS Y PRINTS
-  const [selectedSheetId, setSelectedSheetId] = useState<string>('');
-  const [sheetPrice, setSheetPrice] = useState<number>(7.0);
-  const [sheetFormat, setSheetFormat] = useState<string>('A4');
-  const [selectedSizeLabel, setSelectedSizeLabel] = useState<string>('Normal (2-6cm)');
-  const [stickersPerSheet, setStickersPerSheet] = useState<number>(24);
-  const [laborSeconds, setLaborSeconds] = useState<number>(45);
+  // ==========================================
+  // ESTADOS: HECHO EN CASA
+  // ==========================================
+  const [selectedBasePaperId, setSelectedBasePaperId] = useState<string>('');
+  const [selectedLaminateId, setSelectedLaminateId] = useState<string>('');
+  const [inHouseYield, setInHouseYield] = useState('24'); // Cuántos salen de la hoja casera
+  const [selectedMachineryIds, setSelectedMachineryIds] = useState<number[]>([]);
+  const [laborMinutes, setLaborMinutes] = useState('1.5');
+  const [hourlyWage, setHourlyWage] = useState('25'); // Bs. por hora
 
-  // PINES
-  const [workshopUnitCost, setWorkshopUnitCost] = useState<number>(2.5);
-  const [packagingExtra, setPackagingExtra] = useState<number>(0.4);
+  // Margen de ganancia general
+  const [profitMargin, setProfitMargin] = useState('50');
 
-  // GENERAL / HECHO A MANO
-  const [supplyRows, setSupplyRows] = useState<SupplyUsageRow[]>([]);
-  const [selectedSupplyId, setSelectedSupplyId] = useState<string>('');
-  const [laborTime, setLaborTime] = useState<number>(isSticker ? 45 : 2.5);
-  const [timeUnit, setTimeUnit] = useState<'hours' | 'minutes' | 'seconds'>(isSticker ? 'seconds' : 'hours');
-  const [hourlyWage, setHourlyWage] = useState<number>(20);
-  const [profitMargin, setProfitMargin] = useState<number>(40);
+  // ------------------------------------------
+  // CÁLCULO DE COSTO EN VIVO
+  // ------------------------------------------
+  let unitCostCalculated = 0;
 
-  useEffect(() => {
-    if (currentCategoryConfig && Array.isArray(currentCategoryConfig.fields)) {
-      const sizeField = currentCategoryConfig.fields.find(
-        (f) => f && f.name && (f.name.toLowerCase().includes('tamaño') || f.name.toLowerCase().includes('medida'))
-      );
-
-      if (sizeField && Array.isArray(sizeField.variantOptions) && sizeField.variantOptions.length > 0) {
-        const normalOpt = sizeField.variantOptions.find((vo) => vo.label.toLowerCase().includes('normal') || vo.label.toLowerCase().includes('a6')) || sizeField.variantOptions[0];
-        
-        setSelectedSizeLabel(normalOpt.label);
-        if (normalOpt.baseYield) setStickersPerSheet(normalOpt.baseYield);
-        if (normalOpt.baseSheetFormat) setSheetFormat(normalOpt.baseSheetFormat);
-        if (isPin && normalOpt.defaultCost) setWorkshopUnitCost(normalOpt.defaultCost);
-      }
+  if (origin === 'outsourced') {
+    if (outsourcedType === 'sheet') {
+      const sheetPrice = Number(outsourcedSheetCost) || 0;
+      const pieces = Number(outsourcedYield) || 1;
+      const basePieceCost = pieces > 0 ? sheetPrice / pieces : 0;
+      unitCostCalculated = basePieceCost + (Number(extraPackagingCost) || 0);
+    } else {
+      unitCostCalculated = (Number(outsourcedDirectUnitCost) || 0) + (Number(extraPackagingCost) || 0);
     }
-  }, [currentCategoryConfig, isPin]);
-
-  const handleStickerSizeSelect = (label: string) => {
-    setSelectedSizeLabel(label);
-    if (currentCategoryConfig && Array.isArray(currentCategoryConfig.fields)) {
-      const sizeField = currentCategoryConfig.fields.find(
-        (f) => f && f.name && (f.name.toLowerCase().includes('tamaño') || f.name.toLowerCase().includes('medida'))
-      );
-      const matched = sizeField?.variantOptions?.find((vo) => vo.label === label);
-      if (matched) {
-        if (matched.baseYield) setStickersPerSheet(matched.baseYield);
-        if (matched.baseSheetFormat) setSheetFormat(matched.baseSheetFormat);
-      }
-    }
-  };
-
-  const handleSheetChange = (idStr: string) => {
-    setSelectedSheetId(idStr);
-    const item = supplies.find((s) => s.id === Number(idStr));
-    if (item) {
-      setSheetPrice(item.costPerUnit);
-      if (item.sheetFormat) setSheetFormat(item.sheetFormat);
-    }
-  };
-
-  const handleAddSupplyRow = () => {
-    const s = supplies.find((item) => item.id === Number(selectedSupplyId));
-    if (!s) return;
-    const isWeight = s.unit.toLowerCase().includes('g') || s.unit.toLowerCase().includes('ovillo');
-
-    setSupplyRows([
-      ...supplyRows,
-      {
-        supplyId: s.id!,
-        name: s.name,
-        unitPrice: s.costPerUnit,
-        calcMode: isWeight ? 'grams' : 'batch',
-        gramsUsed: 25,
-        totalGramsInPackage: s.unit.toLowerCase().includes('kilo') ? 1000 : 100,
-        quantityUsed: 1,
-        unitsProduced: 1,
-      },
-    ]);
-    setSelectedSupplyId('');
-  };
-
-  // Cálculo final
-  let calculatedCost = 0;
-  if (isSticker) {
-    const costPaper = stickersPerSheet > 0 ? sheetPrice / stickersPerSheet : 0;
-    const costLabor = (laborSeconds / 3600) * hourlyWage;
-    calculatedCost = costPaper + costLabor;
-  } else if (isPin) {
-    calculatedCost = workshopUnitCost + packagingExtra;
   } else {
-    const matTotal = supplyRows.reduce((acc, row) => {
-      if (row.calcMode === 'grams') {
-        return acc + (row.unitPrice / (row.totalGramsInPackage || 100)) * row.gramsUsed;
-      }
-      return acc + (row.unitPrice * row.quantityUsed) / (row.unitsProduced || 1);
+    // Hecho en casa:
+    const basePaper = supplies.find((s) => s.id === Number(selectedBasePaperId));
+    const laminate = supplies.find((s) => s.id === Number(selectedLaminateId));
+    const pieces = Number(inHouseYield) || 1;
+
+    const paperCostPerPiece = basePaper && pieces > 0 ? basePaper.costPerUnit / pieces : 0;
+    const laminateCostPerPiece = laminate && pieces > 0 ? laminate.costPerUnit / pieces : 0;
+
+    // Desgaste de máquinas seleccionadas
+    const machineryDepreciation = selectedMachineryIds.reduce((acc, id) => {
+      const m = machinery.find((item) => item.id === id);
+      return acc + (m ? m.depreciationPerUse / (pieces > 0 ? pieces : 1) : 0);
     }, 0);
-    const timeInHours = timeUnit === 'hours' ? laborTime : timeUnit === 'minutes' ? laborTime / 60 : laborTime / 3600;
-    calculatedCost = matTotal + timeInHours * hourlyWage;
+
+    // Mano de obra por pieza
+    const minutes = Number(laborMinutes) || 0;
+    const wage = Number(hourlyWage) || 0;
+    const laborCostPerPiece = (minutes / 60) * wage;
+
+    unitCostCalculated = paperCostPerPiece + laminateCostPerPiece + machineryDepreciation + laborCostPerPiece + (Number(extraPackagingCost) || 0);
   }
 
-  const finalSuggestedPrice = Math.max(1, Math.ceil(calculatedCost * (1 + profitMargin / 100)));
+  const marginNum = Number(profitMargin) || 0;
+  const suggestedSalePrice = Math.max(1, Math.ceil(unitCostCalculated * (1 + marginNum / 100)));
+
+  const toggleMachinery = (id: number) => {
+    setSelectedMachineryIds((prev) =>
+      prev.includes(id) ? prev.filter((mId) => mId !== id) : [...prev, id]
+    );
+  };
 
   const inputStyle: React.CSSProperties = {
     backgroundColor: 'var(--bg-main)',
@@ -138,328 +103,329 @@ export const CostCalculatorModal: React.FC<Props> = ({ categoryName, onApplyCost
   };
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
       <div 
-        className="rounded-3xl p-5 sm:p-6 max-w-lg w-full relative shadow-2xl border max-h-[92vh] overflow-y-auto space-y-4"
+        className="rounded-3xl p-5 sm:p-6 max-w-lg w-full relative shadow-2xl border max-h-[94vh] overflow-y-auto space-y-4 my-auto"
         style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-card)' }}
       >
-        <div className="flex justify-between items-center border-b pb-2.5" style={{ borderColor: 'var(--border-card)' }}>
-          <h3 className="font-extrabold text-base sm:text-lg flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-            <Calculator size={18} style={{ color: 'var(--accent)' }} /> Calculadora: {categoryName}
-          </h3>
+        {/* Cabecera */}
+        <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--border-card)' }}>
+          <div>
+            <h3 className="font-extrabold text-base sm:text-lg flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+              <Calculator size={18} style={{ color: 'var(--accent)' }} /> Calculadora: {categoryName}
+            </h3>
+            <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              Elige cómo fabricas esta pieza para obtener el costo real exacto.
+            </span>
+          </div>
           <button onClick={onClose} className="p-1 rounded-full hover:opacity-70 cursor-pointer" style={{ color: 'var(--text-muted)' }}>
             <X size={18} />
           </button>
         </div>
 
-        {/* STICKERS Y PRINTS */}
-        {isSticker && (
-          <div className="space-y-3.5 p-3.5 rounded-2xl border" style={{ backgroundColor: 'var(--bg-main)', borderColor: 'var(--border-card)' }}>
-            <div>
-              <label className="text-xs font-bold block mb-1" style={{ color: 'var(--text-primary)' }}>
-                1. Papel, Lámina o Servicio de Imprenta:
-              </label>
-              <select
-                value={selectedSheetId}
-                onChange={(e) => handleSheetChange(e.target.value)}
-                className="w-full text-xs border rounded-xl p-2 outline-none"
-                style={inputStyle}
-              >
-                <option value="" style={inputStyle}>-- Seleccionar hoja de tu inventario --</option>
-                {supplies.map((s) => (
-                  <option key={s.id} value={s.id} style={inputStyle}>
-                    {s.name} ({s.sheetFormat ? `${s.sheetFormat} - ` : ''}Bs. {s.costPerUnit} / {s.unit})
-                  </option>
-                ))}
-              </select>
+        {/* SELECTOR DUAL DE MODO: TERCERIZADO VS HECHO EN CASA */}
+        <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl border" style={{ backgroundColor: 'var(--bg-main)', borderColor: 'var(--border-card)' }}>
+          <button
+            type="button"
+            onClick={() => setOrigin('outsourced')}
+            className="py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+            style={{
+              backgroundColor: origin === 'outsourced' ? 'var(--accent)' : 'transparent',
+              color: origin === 'outsourced' ? '#ffffff' : 'var(--text-muted)',
+            }}
+          >
+            <Truck size={15} /> Pedido a Tercero / Taller
+          </button>
 
-              <div className="flex items-center justify-between text-xs pt-1.5">
-                <span style={{ color: 'var(--text-muted)' }}>Costo por hoja ({sheetFormat}):</span>
-                <div className="flex items-center gap-1">
-                  <span className="font-bold text-xs" style={{ color: 'var(--text-primary)' }}>Bs.</span>
-                  <input
-                    type="number"
-                    step="0.5"
-                    value={sheetPrice}
-                    onChange={(e) => setSheetPrice(Number(e.target.value))}
-                    className="w-20 border rounded-lg p-1 text-center font-bold text-xs outline-none"
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-            </div>
+          <button
+            type="button"
+            onClick={() => setOrigin('in_house')}
+            className="py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+            style={{
+              backgroundColor: origin === 'in_house' ? 'var(--accent)' : 'transparent',
+              color: origin === 'in_house' ? '#ffffff' : 'var(--text-muted)',
+            }}
+          >
+            <Home size={15} /> Hecho en Casa
+          </button>
+        </div>
 
-            <div className="border-t pt-2.5 space-y-2" style={{ borderColor: 'var(--border-card)' }}>
-              <label className="text-xs font-bold block" style={{ color: 'var(--text-primary)' }}>
-                2. Tamaño del Producto (Rendimiento en {sheetFormat}):
-              </label>
-
-              {/* Botones de tamaños cargados dinámicamente */}
-              <div className="flex flex-wrap gap-1.5">
-                {currentCategoryConfig?.fields?.find(f => f.name.toLowerCase().includes('tamaño'))?.options?.map((sizeOpt) => (
-                  <button
-                    key={sizeOpt}
-                    type="button"
-                    onClick={() => handleStickerSizeSelect(sizeOpt)}
-                    className="py-1.5 px-3 rounded-xl border text-xs font-bold transition cursor-pointer"
-                    style={{
-                      backgroundColor: selectedSizeLabel === sizeOpt ? 'var(--accent)' : 'var(--bg-card)',
-                      color: selectedSizeLabel === sizeOpt ? '#ffffff' : 'var(--text-primary)',
-                      borderColor: 'var(--border-card)',
-                    }}
-                  >
-                    {sizeOpt}
-                  </button>
-                )) || (
-                  ['Mini (1-2cm)', 'Normal (2-6cm)', 'Grande (6-8cm)'].map((sizeOpt) => (
-                    <button
-                      key={sizeOpt}
-                      type="button"
-                      onClick={() => handleStickerSizeSelect(sizeOpt)}
-                      className="py-1.5 px-3 rounded-xl border text-xs font-bold transition cursor-pointer"
-                      style={{
-                        backgroundColor: selectedSizeLabel === sizeOpt ? 'var(--accent)' : 'var(--bg-card)',
-                        color: selectedSizeLabel === sizeOpt ? '#ffffff' : 'var(--text-primary)',
-                        borderColor: 'var(--border-card)',
-                      }}
-                    >
-                      {sizeOpt}
-                    </button>
-                  ))
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                <div>
-                  <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>Entran en la hoja {sheetFormat}:</span>
-                  <input
-                    type="number"
-                    value={stickersPerSheet}
-                    onChange={(e) => setStickersPerSheet(Number(e.target.value))}
-                    className="w-full border rounded-lg p-1.5 text-center font-bold outline-none"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>Mano de obra (segundos):</span>
-                  <input
-                    type="number"
-                    value={laborSeconds}
-                    onChange={(e) => setLaborSeconds(Number(e.target.value))}
-                    className="w-full border rounded-lg p-1.5 text-center font-bold outline-none"
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-
-              <div className="p-2.5 rounded-xl border flex justify-between items-center text-xs" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-card)' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Costo material por unidad:</span>
-                <strong style={{ color: 'var(--accent)' }}>
-                  Bs. {stickersPerSheet > 0 ? (sheetPrice / stickersPerSheet).toFixed(2) : '0.00'}
-                </strong>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* PINES */}
-        {isPin && (
-          <div className="space-y-3 p-3.5 rounded-2xl border" style={{ backgroundColor: 'var(--bg-main)', borderColor: 'var(--border-card)' }}>
-            <div>
-              <span className="text-xs font-bold block mb-1" style={{ color: 'var(--text-primary)' }}>
-                Tarifa de taller por pin:
+        {/* ======================================================== */}
+        {/* CASO 1: PEDIDO A TERCERO / IMPRENTA EXTERNA             */}
+        {/* ======================================================== */}
+        {origin === 'outsourced' && (
+          <div className="space-y-3.5 p-4 rounded-2xl border" style={{ backgroundColor: 'var(--bg-main)', borderColor: 'var(--border-card)' }}>
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-bold block" style={{ color: 'var(--text-primary)' }}>
+                Modalidad de cobro del taller:
               </span>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-xs" style={{ color: 'var(--text-muted)' }}>Bs.</span>
+              <div className="flex gap-1 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setOutsourcedType('sheet')}
+                  className="px-2.5 py-1 rounded-lg border font-bold cursor-pointer"
+                  style={{
+                    backgroundColor: outsourcedType === 'sheet' ? 'var(--accent-soft)' : 'transparent',
+                    borderColor: outsourcedType === 'sheet' ? 'var(--accent)' : 'var(--border-card)',
+                    color: outsourcedType === 'sheet' ? 'var(--accent)' : 'var(--text-muted)',
+                  }}
+                >
+                  Por Hoja/Pliego
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOutsourcedType('unit')}
+                  className="px-2.5 py-1 rounded-lg border font-bold cursor-pointer"
+                  style={{
+                    backgroundColor: outsourcedType === 'unit' ? 'var(--accent-soft)' : 'transparent',
+                    borderColor: outsourcedType === 'unit' ? 'var(--accent)' : 'var(--border-card)',
+                    color: outsourcedType === 'unit' ? 'var(--accent)' : 'var(--text-muted)',
+                  }}
+                >
+                  Por Pieza Unitaria
+                </button>
+              </div>
+            </div>
+
+            {outsourcedType === 'sheet' ? (
+              <div className="space-y-2.5">
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-[10px] font-bold block mb-1" style={{ color: 'var(--text-muted)' }}>
+                      Tamaño de Hoja:
+                    </label>
+                    <input
+                      type="text"
+                      value={outsourcedSheetName}
+                      onChange={(e) => setOutsourcedSheetName(e.target.value.toUpperCase())}
+                      placeholder="A4, A3, Carta"
+                      className="w-full border rounded-xl p-2 text-xs font-mono font-bold text-center outline-none"
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold block mb-1" style={{ color: 'var(--text-muted)' }}>
+                      Costo Hoja (Bs.):
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      value={outsourcedSheetCost}
+                      onChange={(e) => setOutsourcedSheetCost(e.target.value)}
+                      placeholder="Ej: 6.00"
+                      className="w-full border rounded-xl p-2 text-xs font-bold text-center outline-none"
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold block mb-1" style={{ color: 'var(--text-muted)' }}>
+                      Entran en la hoja:
+                    </label>
+                    <input
+                      type="number"
+                      value={outsourcedYield}
+                      onChange={(e) => setOutsourcedYield(e.target.value)}
+                      placeholder="Ej: 24"
+                      className="w-full border rounded-xl p-2 text-xs font-bold text-center outline-none"
+                      style={inputStyle}
+                    />
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl border flex justify-between items-center text-xs" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-card)' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Costo base por cada sticker/print:</span>
+                  <strong style={{ color: 'var(--accent)' }}>
+                    Bs. {Number(outsourcedYield) > 0 ? ((Number(outsourcedSheetCost) || 0) / Number(outsourcedYield)).toFixed(3) : '0.00'}
+                  </strong>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="text-[10px] font-bold block mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Tarifa del taller por cada unidad terminada (Bs.):
+                </label>
                 <input
                   type="number"
                   step="0.1"
-                  value={workshopUnitCost}
-                  onChange={(e) => setWorkshopUnitCost(Number(e.target.value))}
-                  className="w-24 border rounded-xl p-2 text-xs font-bold outline-none text-center"
+                  value={outsourcedDirectUnitCost}
+                  onChange={(e) => setOutsourcedDirectUnitCost(e.target.value)}
+                  placeholder="Ej: 2.50"
+                  className="w-full sm:w-40 border rounded-xl p-2 text-xs font-bold text-center outline-none"
                   style={inputStyle}
                 />
               </div>
-            </div>
+            )}
 
             <div>
-              <label className="text-xs font-semibold block mb-1" style={{ color: 'var(--text-muted)' }}>
-                Empaque / bolsita por unidad (Bs.):
+              <label className="text-[10px] font-semibold block mb-1" style={{ color: 'var(--text-muted)' }}>
+                Bolsita o empaque adicional por unidad (Bs.):
               </label>
               <input
                 type="number"
-                step="0.1"
-                value={packagingExtra}
-                onChange={(e) => setPackagingExtra(Number(e.target.value))}
-                className="w-24 border rounded-xl p-2 text-xs font-bold outline-none text-center"
+                step="0.05"
+                value={extraPackagingCost}
+                onChange={(e) => setExtraPackagingCost(e.target.value)}
+                className="w-28 border rounded-xl p-1.5 text-xs text-center font-bold outline-none"
                 style={inputStyle}
               />
             </div>
           </div>
         )}
 
-        {/* GENERAL / CROCHET */}
-        {!isSticker && !isPin && (
-          <div className="space-y-3 p-3.5 rounded-2xl border" style={{ backgroundColor: 'var(--bg-main)', borderColor: 'var(--border-card)' }}>
-            <div className="flex gap-2">
-              <select
-                value={selectedSupplyId}
-                onChange={(e) => setSelectedSupplyId(e.target.value)}
-                className="flex-1 text-xs border rounded-xl p-2 outline-none"
-                style={inputStyle}
-              >
-                <option value="" style={inputStyle}>-- Seleccionar insumo --</option>
-                {supplies.map((s) => (
-                  <option key={s.id} value={s.id} style={inputStyle}>
-                    {s.name} (Bs. {s.costPerUnit} / {s.unit})
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={handleAddSupplyRow}
-                disabled={!selectedSupplyId}
-                className="px-3 py-2 rounded-xl text-xs font-bold text-white cursor-pointer disabled:opacity-40"
-                style={{ backgroundColor: 'var(--accent)' }}
-              >
-                <Plus size={14} /> Usar
-              </button>
-            </div>
+        {/* ======================================================== */}
+        {/* CASO 2: HECHO EN CASA (INSUMOS + MÁQUINAS + MANO DE OBRA)*/}
+        {/* ======================================================== */}
+        {origin === 'in_house' && (
+          <div className="space-y-3.5 p-4 rounded-2xl border" style={{ backgroundColor: 'var(--bg-main)', borderColor: 'var(--border-card)' }}>
+            {/* 1. Insumos */}
+            <div className="space-y-2">
+              <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+                <Layers size={14} style={{ color: 'var(--accent)' }} /> 1. Materiales de tu inventario:
+              </span>
 
-            {supplyRows.map((row, idx) => (
-              <div 
-                key={idx} 
-                className="p-3 rounded-2xl border space-y-2" 
-                style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-card)' }}
-              >
-                <div className="flex justify-between items-center text-xs">
-                  <strong style={{ color: 'var(--text-primary)' }}>{row.name}</strong>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                      Bs. {row.unitPrice} el paquete
-                    </span>
-                    <button 
-                      type="button" 
-                      onClick={() => setSupplyRows(supplyRows.filter((_, i) => i !== idx))} 
-                      className="text-red-400 hover:text-red-600 p-1"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>Papel / Material base:</label>
+                  <select
+                    value={selectedBasePaperId}
+                    onChange={(e) => setSelectedBasePaperId(e.target.value)}
+                    className="w-full border rounded-xl p-2 text-xs outline-none"
+                    style={inputStyle}
+                  >
+                    <option value="">-- Seleccionar papel base --</option>
+                    {supplies.map((s) => (
+                      <option key={s.id} value={s.id} style={inputStyle}>
+                        {s.name} (Bs. {s.costPerUnit} / {s.unit})
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
-                {row.calcMode === 'grams' ? (
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>Gramos usados:</span>
-                      <input
-                        type="number"
-                        value={row.gramsUsed}
-                        onChange={(e) => setSupplyRows(supplyRows.map((r, i) => i === idx ? { ...r, gramsUsed: Number(e.target.value) } : r))}
-                        className="w-full border rounded-lg p-1 text-center font-bold outline-none"
-                        style={inputStyle}
-                      />
-                    </div>
-                    <div>
-                      <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>Gramos paquete:</span>
-                      <input
-                        type="number"
-                        value={row.totalGramsInPackage}
-                        onChange={(e) => setSupplyRows(supplyRows.map((r, i) => i === idx ? { ...r, totalGramsInPackage: Number(e.target.value) } : r))}
-                        className="w-full border rounded-lg p-1 text-center outline-none"
-                        style={inputStyle}
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>Cantidad usada:</span>
-                      <input
-                        type="number"
-                        value={row.quantityUsed}
-                        onChange={(e) => setSupplyRows(supplyRows.map((r, i) => i === idx ? { ...r, quantityUsed: Number(e.target.value) } : r))}
-                        className="w-full border rounded-lg p-1 text-center font-bold outline-none"
-                        style={inputStyle}
-                      />
-                    </div>
-                    <div>
-                      <span className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>Unidades que rinde:</span>
-                      <input
-                        type="number"
-                        value={row.unitsProduced}
-                        onChange={(e) => setSupplyRows(supplyRows.map((r, i) => i === idx ? { ...r, unitsProduced: Number(e.target.value) } : r))}
-                        className="w-full border rounded-lg p-1 text-center outline-none"
-                        style={inputStyle}
-                      />
-                    </div>
-                  </div>
-                )}
+                <div>
+                  <label className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>Laminado / Acabado (opcional):</label>
+                  <select
+                    value={selectedLaminateId}
+                    onChange={(e) => setSelectedLaminateId(e.target.value)}
+                    className="w-full border rounded-xl p-2 text-xs outline-none"
+                    style={inputStyle}
+                  >
+                    <option value="">-- Ninguno / Sin Laminar --</option>
+                    {supplies.map((s) => (
+                      <option key={s.id} value={s.id} style={inputStyle}>
+                        {s.name} (Bs. {s.costPerUnit} / {s.unit})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            ))}
 
-            <div className="p-3 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-card)' }}>
-              <span className="text-xs font-bold block" style={{ color: 'var(--text-primary)' }}>
-                Tiempo de elaboración por pieza:
-              </span>
-              <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[10px] font-bold block mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Unidades que rinde esa hoja entera en casa:
+                </label>
                 <input
                   type="number"
-                  step="0.5"
-                  value={laborTime}
-                  onChange={(e) => setLaborTime(Number(e.target.value))}
-                  className="border rounded-xl p-2 text-xs font-bold text-center outline-none"
+                  value={inHouseYield}
+                  onChange={(e) => setInHouseYield(e.target.value)}
+                  className="w-28 border rounded-xl p-1.5 text-xs text-center font-bold outline-none"
                   style={inputStyle}
                 />
-                <select
-                  value={timeUnit}
-                  onChange={(e) => setTimeUnit(e.target.value as any)}
-                  className="border rounded-xl p-2 text-xs outline-none"
-                  style={inputStyle}
-                >
-                  <option value="seconds" style={inputStyle}>Segundos</option>
-                  <option value="minutes" style={inputStyle}>Minutos</option>
-                  <option value="hours" style={inputStyle}>Horas</option>
-                </select>
-                <div className="relative">
+              </div>
+            </div>
+
+            {/* 2. Maquinaria usada */}
+            {machinery.length > 0 && (
+              <div className="border-t pt-2.5 space-y-1.5" style={{ borderColor: 'var(--border-card)' }}>
+                <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+                  <Cpu size={14} style={{ color: 'var(--accent)' }} /> 2. Desgaste de Maquinaria utilizada:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {machinery.map((m) => {
+                    const isChecked = selectedMachineryIds.includes(m.id!);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => toggleMachinery(m.id!)}
+                        className="p-2 rounded-xl border text-left flex justify-between items-center text-xs transition cursor-pointer"
+                        style={{
+                          backgroundColor: isChecked ? 'var(--accent-soft)' : 'var(--bg-card)',
+                          borderColor: isChecked ? 'var(--accent)' : 'var(--border-card)',
+                          color: isChecked ? 'var(--accent)' : 'var(--text-primary)',
+                        }}
+                      >
+                        <span className="font-semibold truncate">{m.name}</span>
+                        <span className="text-[10px] font-bold shrink-0 ml-1">+Bs. {m.depreciationPerUse.toFixed(2)}/uso</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* 3. Mano de Obra */}
+            <div className="border-t pt-2.5 space-y-2" style={{ borderColor: 'var(--border-card)' }}>
+              <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+                <Clock size={14} style={{ color: 'var(--accent)' }} /> 3. Tiempo de Confección / Armado:
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>Minutos por pieza:</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={laborMinutes}
+                    onChange={(e) => setLaborMinutes(e.target.value)}
+                    className="w-full border rounded-xl p-1.5 text-xs text-center font-bold outline-none"
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] block" style={{ color: 'var(--text-muted)' }}>Salario por hora (Bs./h):</label>
                   <input
                     type="number"
                     value={hourlyWage}
-                    onChange={(e) => setHourlyWage(Number(e.target.value))}
-                    className="w-full border rounded-xl p-2 text-xs text-center font-bold outline-none"
+                    onChange={(e) => setHourlyWage(e.target.value)}
+                    className="w-full border rounded-xl p-1.5 text-xs text-center font-bold outline-none"
                     style={inputStyle}
                   />
-                  <span className="text-[9px] block text-center mt-0.5" style={{ color: 'var(--text-muted)' }}>Bs./hora</span>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Margen */}
+        {/* MARGEN DE GANANCIA */}
         <div className="flex justify-between items-center text-xs px-1">
-          <span className="font-semibold" style={{ color: 'var(--text-muted)' }}>Margen de ganancia (%):</span>
-          <input
-            type="number"
-            value={profitMargin}
-            onChange={(e) => setProfitMargin(Number(e.target.value))}
-            className="w-20 border rounded-xl p-1.5 font-bold text-center outline-none"
-            style={inputStyle}
-          />
+          <span className="font-semibold" style={{ color: 'var(--text-muted)' }}>
+            Margen de Ganancia Deseado (%):
+          </span>
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              value={profitMargin}
+              onChange={(e) => setProfitMargin(e.target.value)}
+              className="w-20 border rounded-xl p-1.5 font-bold text-center outline-none"
+              style={inputStyle}
+            />
+            <span className="font-bold text-xs" style={{ color: 'var(--text-muted)' }}>%</span>
+          </div>
         </div>
 
-        {/* Resumen */}
+        {/* RESULTADO Y APLICAR */}
         <div className="p-3.5 rounded-2xl space-y-1 border" style={{ backgroundColor: 'var(--accent-soft)', borderColor: 'var(--border-card)' }}>
           <div className="flex justify-between text-xs">
-            <span style={{ color: 'var(--text-muted)' }}>Costo Unitario Real:</span>
+            <span style={{ color: 'var(--text-muted)' }}>Costo Unitario Real ({origin === 'outsourced' ? 'Taller' : 'Taller Casero'}):</span>
             <strong className="font-bold" style={{ color: 'var(--text-primary)' }}>
-              Bs. {calculatedCost.toFixed(2)}
+              Bs. {unitCostCalculated.toFixed(2)}
             </strong>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="font-bold" style={{ color: 'var(--text-primary)' }}>Precio Venta Sugerido:</span>
+            <span className="font-bold" style={{ color: 'var(--text-primary)' }}>Precio de Venta Sugerido:</span>
             <strong className="font-extrabold text-base" style={{ color: 'var(--accent)' }}>
-              Bs. {finalSuggestedPrice.toFixed(2)}
+              Bs. {suggestedSalePrice.toFixed(2)}
             </strong>
           </div>
         </div>
@@ -467,13 +433,13 @@ export const CostCalculatorModal: React.FC<Props> = ({ categoryName, onApplyCost
         <button
           type="button"
           onClick={() => {
-            onApplyCost(Number(calculatedCost.toFixed(2)), finalSuggestedPrice);
+            onApplyCost(Number(unitCostCalculated.toFixed(2)), suggestedSalePrice);
             onClose();
           }}
-          className="w-full py-3 text-white font-bold rounded-2xl shadow-sm transition flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full py-3.5 text-white font-bold rounded-2xl shadow-sm transition flex items-center justify-center gap-2 cursor-pointer"
           style={{ backgroundColor: 'var(--accent)' }}
         >
-          <Check size={18} /> Aplicar al Producto
+          <Check size={18} /> Aplicar al Formulario de Producto
         </button>
       </div>
     </div>
